@@ -1,6 +1,7 @@
 services:
   jenkins:
     image: local/jenkins:lts-jdk21
+    pull_policy: build
     build:
       context: ./jenkins
       dockerfile: Dockerfile
@@ -12,6 +13,7 @@ services:
 
   nginx-pipeline:
     image: local/nginx:alpine
+    pull_policy: build
     build:
       context: ./nginx
       dockerfile: Dockerfile
@@ -26,6 +28,7 @@ services:
 
   sonarqube:
     image: local/sonarqube:lts-community
+    pull_policy: build
     build:
       context: ./sonarqube
       dockerfile: Dockerfile
@@ -65,6 +68,7 @@ services:
 
   zap:
     image: local/owasp-zap:stable
+    pull_policy: build
     build:
       context: ./owasp-zap
       dockerfile: Dockerfile
