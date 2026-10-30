@@ -11,7 +11,7 @@ La documentation détaillée et les diagrammes sont disponibles dans
 - **Jenkins** : serveur CI, accessible via Nginx; son port n'est pas publié sur l'hôte.
 - **SonarQube** : analyse de code, relié à PostgreSQL et accessible via Nginx.
 - **PostgreSQL** : base de données interne à SonarQube, sans port hôte publié.
-- **Nginx** : point d'entrée HTTP sur le port 8081 de l'hôte et proxy vers Jenkins et SonarQube.
+- **Nginx** : point d'entrée HTTP local sur `127.0.0.1:8081`, proxy vers Jenkins et SonarQube.
 - **OWASP ZAP** : service optionnel, activé par le profil `security-tools`.
 
 Chaque service construit son image depuis son propre dossier : `jenkins/`,
@@ -66,13 +66,14 @@ docker compose ps
 
 Accès depuis le serveur :
 
-- Jenkins via Nginx : `http://jenkins.hakilox.com:8081`
-- SonarQube via Nginx : `http://sonar.hakilox.com:8081`
-- SonarQube directement, depuis le serveur uniquement : `http://127.0.0.1:9000`
+- Jenkins via Nginx : `http://127.0.0.1:8081`
+- SonarQube directement : `http://127.0.0.1:9000`
 
-Pour accéder aux noms de domaine avant la configuration DNS, ajouter une entrée
-sur le poste client ou utiliser temporairement l'adresse IP du serveur avec un
-en-tête `Host` correspondant.
+Depuis un autre ordinateur du même réseau, ouvrez Jenkins avec
+`http://IP_LOCALE_DU_SERVEUR:8081` (remplacez par l'adresse IP locale du serveur).
+Le port 8081 doit être autorisé par le pare-feu uniquement depuis le réseau local.
+N'utilisez pas le domaine `hakilox.com` pour cet accès HTTP, car le navigateur
+peut forcer HTTPS.
 
 ## Utilisation
 
@@ -113,7 +114,7 @@ mais reste aussi joignable par Nginx sur le réseau Docker. Jenkins n'a aucun po
 hôte publié. Les détails sur les bindings réseau sont dans
 [`docs/note.md`](docs/note.md).
 
-Nginx écoute dans le conteneur sur le port 80, publié sur le port 8081 de l'hôte;
-le port 443 et TLS ne sont pas
-configurés. Avant d'exposer les interfaces de connexion sur Internet, configurer
-un certificat TLS et activer HTTPS.
+Nginx écoute dans le conteneur sur le port 80, publié sur le port 8081 de toutes
+les interfaces du serveur. Limitez l'accès au port 8081 au réseau local avec le
+pare-feu. SonarQube reste lié à `127.0.0.1:9000` et n'est pas directement
+accessible depuis un autre ordinateur.

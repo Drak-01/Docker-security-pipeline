@@ -6,7 +6,7 @@ La configuration `docker-compose.yml` déploie les services suivants :
 
 | Service | Rôle | Exposition |
 | --- | --- | --- |
-| Nginx (`nginx-pipeline`) | Reverse proxy HTTP | Port hôte 8081 par défaut, port 80 dans le conteneur |
+| Nginx (`nginx-pipeline`) | Reverse proxy HTTP | Port 8081 sur l'hôte, port 80 dans le conteneur |
 | Jenkins | Exécution CI/CD | Réseau Docker uniquement; routé par Nginx |
 | SonarQube | Analyse de code | Réseau Docker et `127.0.0.1:9000` sur l'hôte |
 | PostgreSQL (`sonarqube-db`) | Base SonarQube | Réseau Docker uniquement |
@@ -19,7 +19,7 @@ PostgreSQL disposent de volumes nommés pour conserver leurs données.
 
 ```mermaid
 flowchart LR
-    Client[Utilisateur ou navigateur] -->|HTTP : port 8081| Nginx
+    Client[Poste du réseau local] -->|HTTP : IP_SERVEUR:8081| Nginx
 
     subgraph Docker[Reseau Docker Compose : pipeline]
         Nginx -->|jenkins.hakilox.com| Jenkins
@@ -37,9 +37,10 @@ Nginx choisit le service amont selon le nom d'hôte HTTP. Les noms actuels sont
 vers le serveur, ou ces noms doivent être adaptés à l'environnement.
 
 Jenkins n'a pas de port publié sur l'hôte. Nginx le joint par son nom de service
-Compose (`jenkins`). SonarQube est également accessible directement depuis le
-serveur sur `http://127.0.0.1:9000`; PostgreSQL n'est pas publié. Le port 443 et
-TLS ne sont pas configurés dans l'état actuel.
+Compose (`jenkins`). Nginx publie le port 8081 sur les interfaces du serveur;
+limiter ce port au réseau local avec le pare-feu. SonarQube est lié uniquement à
+`127.0.0.1:9000`; PostgreSQL n'est pas publié. Cette configuration HTTP locale
+n'utilise pas TLS.
 
 ZAP est sous profil optionnel. Sa commande actuelle met à jour les modules
 complémentaires puis se termine; elle ne lance pas de scan.
