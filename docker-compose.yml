@@ -1,0 +1,87 @@
+services:
+  jenkins:
+    image: local/jenkins:lts-jdk21
+    build:
+      context: ./jenkins
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - jenkins_home:/var/jenkins_home
+    networks:
+      - pipeline
+
+  nginx-pipeline:
+    image: local/nginx:alpine
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - jenkins
+      - sonarqube
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    networks:
+      - pipeline
+
+  sonarqube:
+    image: local/sonarqube:lts-community
+    build:
+      context: ./sonarqube
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      sonarqube-db:
+        condition: service_healthy
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Définis SONAR_DB_PASSWORD dans .env}
+    ports:
+      - "127.0.0.1:${SONARQUBE_HTTP_PORT:-9000}:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    networks:
+      - pipeline
+
+  sonarqube-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sonarqube
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?Définis SONAR_DB_PASSWORD dans .env}
+    volumes:
+      - sonarqube_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonarqube"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pipeline
+
+  zap:
+    image: local/owasp-zap:stable
+    build:
+      context: ./owasp-zap
+      dockerfile: Dockerfile
+    profiles:
+      - security-tools
+    entrypoint: ["zap.sh"]
+    command: ["-cmd", "-addonupdate"]
+    networks:
+      - pipeline
+
+volumes:
+  jenkins_home:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  sonarqube_db:
+
+networks:
+  pipeline:
+    driver: bridge
