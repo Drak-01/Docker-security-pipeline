@@ -11,7 +11,7 @@ La documentation détaillée et les diagrammes sont disponibles dans
 - **Jenkins** : serveur CI, accessible via Nginx; son port n'est pas publié sur l'hôte.
 - **SonarQube** : analyse de code, relié à PostgreSQL et accessible via Nginx.
 - **PostgreSQL** : base de données interne à SonarQube, sans port hôte publié.
-- **Nginx** : point d'entrée HTTP local sur `127.0.0.1:8081`, proxy vers Jenkins et SonarQube.
+- **Nginx** : reverse proxy interne aux deux sous-domaines derrière Cloudflare Tunnel.
 - **OWASP ZAP** : service optionnel, activé par le profil `security-tools`.
 
 Chaque service construit son image depuis son propre dossier : `jenkins/`,
@@ -23,7 +23,7 @@ dans des volumes Docker nommés.
 - Docker Engine
 - Docker Compose v2 (`docker compose`)
 - Linux : droits suffisants pour régler les paramètres noyau de SonarQube
-- Port 8081 disponible sur l'hôte; le port 9000 est utilisé localement par SonarQube
+- Port 9000 disponible localement pour SonarQube
 
 SonarQube utilise Elasticsearch et nécessite des paramètres noyau adaptés :
 
@@ -50,10 +50,31 @@ Utiliser un mot de passe long et unique pour `SONAR_DB_PASSWORD`. La même valeu
 est utilisée par PostgreSQL et SonarQube. Ne pas publier ni committer un vrai
 fichier `.env` contenant des secrets.
 
-Les noms d'hôtes Nginx sont définis dans
-[`nginx/conf.d/default.conf`](nginx/conf.d/default.conf) :
-`jenkins.hakilox.com` et `sonar.hakilox.com`. Configurer leurs entrées DNS vers
-l'adresse du serveur, ou remplacer ces noms par ceux de votre environnement.
+Cloudflared tourne sur l'hôte via systemd. Dans le fichier de configuration du
+tunnel existant, conserve son UUID et son fichier de credentials et configure
+les règles d'ingress suivantes :
+
+```yaml
+ingress:
+	- hostname: jenkins.hakilox.com
+		service: http://localhost:8081
+		originRequest:
+			httpHostHeader: jenkins.hakilox.com
+	- hostname: sonar.hakilox.com
+		service: http://localhost:8082
+		originRequest:
+			httpHostHeader: sonar.hakilox.com
+	- service: http_status:404
+```
+
+Les ports Nginx sont liés à `127.0.0.1`; Cloudflared les atteint par localhost.
+Le client systemd n'a pas besoin de rejoindre le réseau Docker. Cloudflare
+termine le HTTPS public; la liaison d'origine reste en HTTP local. Ne configure
+pas `noTLSVerify` pour ces origines HTTP.
+
+Dans Cloudflare Access, protège les deux sous-domaines. Pour préserver les
+webhooks GitHub, exclue uniquement `/github-webhook/` de l'interaction Access
+si nécessaire et active un secret de webhook dans Jenkins.
 
 ## Démarrage
 
@@ -65,17 +86,16 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Accès depuis le serveur :
+Accès via Cloudflare Tunnel :
 
-- Jenkins via Nginx : `http://127.0.0.1:8081`
+- Jenkins : `https://jenkins.hakilox.com`
+- SonarQube : `https://sonar.hakilox.com`
 - SonarQube directement : `http://127.0.0.1:9000`
 
-Depuis un autre ordinateur du même réseau, ouvrez Jenkins avec
-`http://IP_LOCALE_DU_SERVEUR:8081` (remplacez par l'adresse IP locale du serveur).
-SonarQube est accessible sur `http://IP_LOCALE_DU_SERVEUR:8082`. Autorisez les
-ports 8081 et 8082 dans le pare-feu uniquement depuis le réseau local.
-N'utilisez pas le domaine `hakilox.com` pour cet accès HTTP, car le navigateur
-peut forcer HTTPS.
+Les URLs publiques sont servies en HTTPS par Cloudflare. Configure également
+l'URL Jenkins (`https://jenkins.hakilox.com`) dans Jenkins et l'URL de base
+SonarQube (`https://sonar.hakilox.com`) dans ses réglages d'administration pour
+éviter les redirections vers un ancien domaine.
 
 ## Utilisation
 
@@ -116,7 +136,17 @@ mais reste aussi joignable par Nginx sur le réseau Docker. Jenkins n'a aucun po
 hôte publié. Les détails sur les bindings réseau sont dans
 [`docs/note.md`](docs/note.md).
 
-Nginx écoute dans le conteneur sur les ports 80 et 8082, publiés respectivement
-sur 8081 et 8082 de toutes les interfaces du serveur. Limitez les deux ports au
-réseau local avec le pare-feu. SonarQube reste lié à `127.0.0.1:9000`; le port
-8082 le relaie via Nginx.
+Cloudflared systemd et Nginx communiquent par les ports loopback 8081 et 8082;
+aucun port public n'est requis sur le serveur pour le tunnel. Jenkins et
+PostgreSQL ne sont pas publiés directement. SonarQube reste accessible sur
+`127.0.0.1:9000` pour l'administration locale.
+
+cp -p .env ../.env.server.backup
+git restore .env
+git pull --ff-only
+cp -p ../.env.server.backup .env
+
+docker compose config --quiet
+docker compose build nginx-pipeline
+docker compose up -d --no-build --force-recreate nginx-pipeline
+docker compose port nginx-pipeline 8082

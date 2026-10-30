@@ -6,7 +6,7 @@ La configuration `docker-compose.yml` déploie les services suivants :
 
 | Service | Rôle | Exposition |
 | --- | --- | --- |
-| Nginx (`nginx-pipeline`) | Reverse proxy HTTP | Ports hôte 8081 (Jenkins) et 8082 (SonarQube) |
+| Nginx (`nginx-pipeline`) | Reverse proxy | `127.0.0.1:8081 → 80` et `127.0.0.1:8082 → 8082` |
 | Jenkins | Exécution CI/CD | Réseau Docker uniquement; routé par Nginx |
 | SonarQube | Analyse de code | Réseau Docker et `127.0.0.1:9000` sur l'hôte |
 | PostgreSQL (`sonarqube-db`) | Base SonarQube | Réseau Docker uniquement |
@@ -19,31 +19,49 @@ PostgreSQL disposent de volumes nommés pour conserver leurs données.
 
 ```mermaid
 flowchart LR
-    Client[Poste du réseau local] -->|HTTP : IP_SERVEUR:8081 Jenkins, :8082 SonarQube| Nginx
+    Client[Internet] -->|HTTPS| Cloudflare
+    Cloudflare --> Tunnel[cloudflared systemd]
 
-    subgraph Docker[Reseau Docker Compose : pipeline]
+    subgraph Docker[Reseau Docker Compose : docker-security-pipeline_pipeline]
         Nginx -->|jenkins.hakilox.com| Jenkins
         Nginx -->|sonar.hakilox.com| SonarQube
         SonarQube --> PostgreSQL
         ZAP[OWASP ZAP - profil optionnel]
     end
 
+    Tunnel -->|localhost:8081 → port 80| Nginx
+    Tunnel -->|localhost:8082 → port 8082| Nginx
     Administrateur[Serveur hote] -->|127.0.0.1:9000| SonarQube
 ```
 
 Nginx choisit le service amont selon le nom d'hôte HTTP. Les noms actuels sont
 `jenkins.hakilox.com` et `sonar.hakilox.com`; ils sont définis dans
 [`nginx/conf.d/default.conf`](../nginx/conf.d/default.conf). Le DNS doit pointer
-vers le serveur, ou ces noms doivent être adaptés à l'environnement.
+vers le tunnel Cloudflare. Cloudflared tourne sur l'hôte, pas dans Docker : il
+utilise les bindings loopback `http://localhost:8081` et `http://localhost:8082`.
+Il n'a pas besoin de rejoindre le réseau Docker. Configure `httpHostHeader` avec
+le hostname correspondant pour chaque ingress du tunnel.
 
 Jenkins n'a pas de port publié sur l'hôte. Nginx le joint par son nom de service
-Compose (`jenkins`). Nginx publie Jenkins sur 8081 et SonarQube sur 8082;
-limiter ces ports au réseau local avec le pare-feu. SonarQube est aussi lié à
-`127.0.0.1:9000`; PostgreSQL n'est pas publié. Cette configuration HTTP locale
-n'utilise pas TLS.
+Compose (`jenkins`). Les ports hôte de Nginx sont publiés uniquement sur
+`127.0.0.1`; PostgreSQL n'est pas publié. Cloudflare termine le TLS public; les
+origines restent en HTTP local. Cloudflare Access protège les deux applications;
+le webhook Jenkins doit disposer d'une exception de chemin spécifique et d'un
+secret GitHub pour ne pas bloquer les événements.
 
 ZAP est sous profil optionnel. Sa commande actuelle met à jour les modules
 complémentaires puis se termine; elle ne lance pas de scan.
+
+## Cloudflare Tunnel et Access
+
+Le tunnel `hakilox_tunnel` existe déjà et Cloudflared est géré par systemd.
+Conserver son UUID et ses credentials; ne pas créer un autre tunnel. Ajouter les
+deux règles d'ingress vers `localhost:8081` et `localhost:8082`, avec
+`originRequest.httpHostHeader` réglé respectivement à `jenkins.hakilox.com` et
+`sonar.hakilox.com`. Une liaison Docker commune avec Cloudflared n'est pas
+nécessaire puisque le client tunnel tourne sur l'hôte.
+
+
 
 ## Architecture cible
 
