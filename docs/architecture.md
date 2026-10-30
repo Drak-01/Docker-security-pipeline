@@ -6,7 +6,7 @@ La configuration `docker-compose.yml` déploie les services suivants :
 
 | Service | Rôle | Exposition |
 | --- | --- | --- |
-| Nginx (`nginx-pipeline`) | Reverse proxy HTTP | Port hôte 80 par défaut |
+| Nginx (`nginx-pipeline`) | Reverse proxy HTTP | Port hôte 8081 par défaut, port 80 dans le conteneur |
 | Jenkins | Exécution CI/CD | Réseau Docker uniquement; routé par Nginx |
 | SonarQube | Analyse de code | Réseau Docker et `127.0.0.1:9000` sur l'hôte |
 | PostgreSQL (`sonarqube-db`) | Base SonarQube | Réseau Docker uniquement |
@@ -19,7 +19,7 @@ PostgreSQL disposent de volumes nommés pour conserver leurs données.
 
 ```mermaid
 flowchart LR
-    Client[Utilisateur ou navigateur] -->|HTTP : port 80| Nginx
+    Client[Utilisateur ou navigateur] -->|HTTP : port 8081| Nginx
 
     subgraph Docker[Reseau Docker Compose : pipeline]
         Nginx -->|jenkins.hakilox.com| Jenkins

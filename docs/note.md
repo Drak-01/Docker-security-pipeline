@@ -11,14 +11,14 @@ accessible sur toutes les interfaces réseau, sous réserve des règles du pare-
 | Service | Publication | Accès |
 | --- | --- | --- |
 | Jenkins | Aucun port hôte | Via Nginx sur le port 80 |
-| Nginx | `80:80` | Point d'entrée HTTP |
+| Nginx | `8081:80` | Port 8081 de l'hôte vers le port 80 du conteneur |
 | SonarQube | `127.0.0.1:9000:9000` | Depuis le serveur uniquement |
 | PostgreSQL | Aucun port hôte | Réseau Docker uniquement |
 | OWASP ZAP | Aucun port hôte | Profil optionnel, réseau Docker uniquement |
 
 Jenkins n'est pas publié sur le port 8080 de l'hôte. Nginx le joint avec le nom
 de service Compose `jenkins` sur le réseau `pipeline`. Depuis l'extérieur,
-ouvrez `http://<IP-du-serveur>/`. Depuis le serveur, SonarQube est accessible sur
+ouvrez `http://<IP-du-serveur>:8081/`. Depuis le serveur, SonarQube est accessible sur
 `http://127.0.0.1:9000`.
 
 Le port 443 n'est pas activé tant qu'un certificat TLS et sa configuration Nginx

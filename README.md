@@ -11,7 +11,7 @@ La documentation détaillée et les diagrammes sont disponibles dans
 - **Jenkins** : serveur CI, accessible via Nginx; son port n'est pas publié sur l'hôte.
 - **SonarQube** : analyse de code, relié à PostgreSQL et accessible via Nginx.
 - **PostgreSQL** : base de données interne à SonarQube, sans port hôte publié.
-- **Nginx** : point d'entrée HTTP sur le port 80 et proxy vers Jenkins et SonarQube.
+- **Nginx** : point d'entrée HTTP sur le port 8081 de l'hôte et proxy vers Jenkins et SonarQube.
 - **OWASP ZAP** : service optionnel, activé par le profil `security-tools`.
 
 Chaque service construit son image depuis son propre dossier : `jenkins/`,
@@ -23,7 +23,7 @@ dans des volumes Docker nommés.
 - Docker Engine
 - Docker Compose v2 (`docker compose`)
 - Linux : droits suffisants pour régler les paramètres noyau de SonarQube
-- Port 80 disponible sur l'hôte; le port 9000 est utilisé localement par SonarQube
+- Port 8081 disponible sur l'hôte; le port 9000 est utilisé localement par SonarQube
 
 SonarQube utilise Elasticsearch et nécessite des paramètres noyau adaptés :
 
@@ -40,7 +40,7 @@ sudo sysctl --system
 Compléter `.env` avant de démarrer la stack :
 
 ```dotenv
-NGINX_HTTP_PORT=80
+NGINX_HTTP_PORT=8081
 SONARQUBE_HTTP_PORT=9000
 SONAR_DB_PASSWORD=remplacer_par_un_secret_unique
 ```
@@ -66,8 +66,8 @@ docker compose ps
 
 Accès depuis le serveur :
 
-- Jenkins via Nginx : `http://jenkins.hakilox.com`
-- SonarQube via Nginx : `http://sonar.hakilox.com`
+- Jenkins via Nginx : `http://jenkins.hakilox.com:8081`
+- SonarQube via Nginx : `http://sonar.hakilox.com:8081`
 - SonarQube directement, depuis le serveur uniquement : `http://127.0.0.1:9000`
 
 Pour accéder aux noms de domaine avant la configuration DNS, ajouter une entrée
@@ -113,6 +113,7 @@ mais reste aussi joignable par Nginx sur le réseau Docker. Jenkins n'a aucun po
 hôte publié. Les détails sur les bindings réseau sont dans
 [`docs/note.md`](docs/note.md).
 
-Nginx écoute actuellement en HTTP sur le port 80; le port 443 et TLS ne sont pas
+Nginx écoute dans le conteneur sur le port 80, publié sur le port 8081 de l'hôte;
+le port 443 et TLS ne sont pas
 configurés. Avant d'exposer les interfaces de connexion sur Internet, configurer
 un certificat TLS et activer HTTPS.
