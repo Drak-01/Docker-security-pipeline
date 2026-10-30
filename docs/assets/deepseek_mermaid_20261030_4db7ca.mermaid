@@ -1,0 +1,115 @@
+flowchart TB
+    subgraph EXT["🌐 Accès externe"]
+        DEV["👨‍💻 Développeur"]
+        GIT["📦 GitHub / GitLab"]
+    end
+
+    NGINX["🔒 Nginx dédié plateforme<br/>Reverse Proxy HTTPS"]
+
+    subgraph PLATFORM["🐳 DevSecOps-Docker-Platform (réseaux Docker isolés + volumes persistants)"]
+
+        subgraph CI["⚙️ 1. CI/CD & Orchestration"]
+            JEN["🔧 Jenkins<br/>Pipelines CI/CD"]
+        end
+
+        subgraph CODE["🔍 2. Sécurité du code (SAST/SCA/Secrets)"]
+            SONAR["SonarQube<br/>SAST"]
+            PG[("PostgreSQL")]
+            GLK["Gitleaks<br/>Secrets"]
+            DEP["OWASP Dependency-Check<br/>Dépendances"]
+        end
+
+        subgraph IMG["🐋 3. Sécurité conteneurs & IaC"]
+            TRIVY["Trivy<br/>Scan images"]
+            CHECKOV["Checkov<br/>IaC"]
+        end
+
+        subgraph REG["📦 4. Registre & Intégrité"]
+            HARBOR["Harbor<br/>Registre privé"]
+            COSIGN["Cosign<br/>Signature images"]
+        end
+
+        subgraph APP["🚀 5. Environnements applicatifs"]
+            PREPROD["Env. Préproduction"]
+            ZAP["OWASP ZAP<br/>DAST"]
+            PROD["Env. Production"]
+        end
+
+        subgraph VULN["🛡️ 6. Vulnérabilités & Secrets"]
+            DEFECT["DefectDojo<br/>Centralisation"]
+            VAULT["HashiCorp Vault<br/>Secrets"]
+        end
+
+        subgraph OBS["📊 7. Supervision & Runtime"]
+            PROM["Prometheus"]
+            GRAF["Grafana"]
+            FALCO["Falco<br/>Runtime security"]
+        end
+
+        VOL[("💾 Volumes Docker<br/>données, logs, rapports")]
+
+    end
+
+    DEV -->|git push| GIT
+    GIT -->|webhook| JEN
+    NGINX --> JEN
+    NGINX --> SONAR
+    NGINX --> HARBOR
+    NGINX --> DEFECT
+    NGINX --> GRAF
+
+    JEN --> SONAR
+    SONAR --- PG
+    JEN --> GLK
+    JEN --> DEP
+    JEN --> TRIVY
+    JEN --> CHECKOV
+    JEN --> HARBOR
+    HARBOR --> COSIGN
+    JEN --> PREPROD
+    PREPROD --> ZAP
+    ZAP --> DEFECT
+    SONAR --> DEFECT
+    GLK --> DEFECT
+    DEP --> DEFECT
+    TRIVY --> DEFECT
+    CHECKOV --> DEFECT
+    DEFECT --> JEN
+    JEN -->|OK| PROD
+    JEN -->|KO| DEFECT
+    VAULT -.->|secrets| JEN
+    VAULT -.->|secrets| SONAR
+    VAULT -.->|secrets| DEFECT
+    PROM --> JEN
+    PROM --> SONAR
+    PROM --> HARBOR
+    PROM --> DEFECT
+    GRAF --> PROM
+    FALCO -.->|alertes| GRAF
+    JEN --- VOL
+    SONAR --- VOL
+    HARBOR --- VOL
+    DEFECT --- VOL
+    PROM --- VOL
+
+    classDef ext fill:#e3f2fd,stroke:#1976d2,color:#000
+    classDef cicd fill:#e8f5e9,stroke:#388e3c,color:#000
+    classDef code fill:#fff3e0,stroke:#f57c00,color:#000
+    classDef cont fill:#fce4ec,stroke:#ad1457,color:#000
+    classDef reg fill:#ede7f6,stroke:#5e35b1,color:#000
+    classDef app fill:#e0f7fa,stroke:#00838f,color:#000
+    classDef vuln fill:#ffebee,stroke:#c62828,color:#000
+    classDef obs fill:#fffde7,stroke:#f9a825,color:#000
+    classDef store fill:#eceff1,stroke:#455a64,color:#000
+    classDef proxy fill:#f3e5f5,stroke:#7b1fa2,color:#000
+
+    class DEV,GIT ext
+    class JEN cicd
+    class SONAR,PG,GLK,DEP code
+    class TRIVY,CHECKOV cont
+    class HARBOR,COSIGN reg
+    class PREPROD,ZAP,PROD app
+    class DEFECT,VAULT vuln
+    class PROM,GRAF,FALCO obs
+    class VOL store
+    class NGINX proxy

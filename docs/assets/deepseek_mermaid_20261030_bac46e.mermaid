@@ -1,0 +1,23 @@
+flowchart LR
+    P1["Phase 1<br/>Infra de base<br/>Docker · Jenkins · SonarQube · ZAP · Nginx"]
+    P2["Phase 2<br/>Sécurité du code<br/>Gitleaks · Dependency-Check"]
+    P3["Phase 3<br/>Sécurité conteneurs<br/>Trivy · Checkov · Harbor · Cosign"]
+    P4["Phase 4<br/>Centralisation<br/>DefectDojo · Vault"]
+    P5["Phase 5<br/>Supervision<br/>Prometheus · Grafana · Falco"]
+    P6["Phase 6<br/>Automatisation<br/>Pipelines complets + règles de blocage"]
+
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6
+
+    classDef p1 fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef p2 fill:#fff3e0,stroke:#ef6c00,color:#000
+    classDef p3 fill:#fce4ec,stroke:#ad1457,color:#000
+    classDef p4 fill:#ffebee,stroke:#c62828,color:#000
+    classDef p5 fill:#ede7f6,stroke:#5e35b1,color:#000
+    classDef p6 fill:#e0f7fa,stroke:#00838f,color:#000
+
+    class P1 p1
+    class P2 p2
+    class P3 p3
+    class P4 p4
+    class P5 p5
+    class P6 p6

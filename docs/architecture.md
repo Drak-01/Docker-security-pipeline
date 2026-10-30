@@ -1,0 +1,69 @@
+# Architecture
+
+## Périmètre actuellement déployé
+
+La configuration `docker-compose.yml` déploie les services suivants :
+
+| Service | Rôle | Exposition |
+| --- | --- | --- |
+| Nginx (`nginx-pipeline`) | Reverse proxy HTTP | Port hôte 80 par défaut |
+| Jenkins | Exécution CI/CD | Réseau Docker uniquement; routé par Nginx |
+| SonarQube | Analyse de code | Réseau Docker et `127.0.0.1:9000` sur l'hôte |
+| PostgreSQL (`sonarqube-db`) | Base SonarQube | Réseau Docker uniquement |
+| OWASP ZAP (`zap`) | Outil de sécurité optionnel | Profil `security-tools`; aucun port publié |
+
+Tous les services utilisent le réseau bridge `pipeline`. Jenkins, SonarQube et
+PostgreSQL disposent de volumes nommés pour conserver leurs données.
+
+## Flux réseau
+
+```mermaid
+flowchart LR
+    Client[Utilisateur ou navigateur] -->|HTTP : port 80| Nginx
+
+    subgraph Docker[Reseau Docker Compose : pipeline]
+        Nginx -->|jenkins.hakilox.com| Jenkins
+        Nginx -->|sonar.hakilox.com| SonarQube
+        SonarQube --> PostgreSQL
+        ZAP[OWASP ZAP - profil optionnel]
+    end
+
+    Administrateur[Serveur hote] -->|127.0.0.1:9000| SonarQube
+```
+
+Nginx choisit le service amont selon le nom d'hôte HTTP. Les noms actuels sont
+`jenkins.hakilox.com` et `sonar.hakilox.com`; ils sont définis dans
+[`nginx/conf.d/default.conf`](../nginx/conf.d/default.conf). Le DNS doit pointer
+vers le serveur, ou ces noms doivent être adaptés à l'environnement.
+
+Jenkins n'a pas de port publié sur l'hôte. Nginx le joint par son nom de service
+Compose (`jenkins`). SonarQube est également accessible directement depuis le
+serveur sur `http://127.0.0.1:9000`; PostgreSQL n'est pas publié. Le port 443 et
+TLS ne sont pas configurés dans l'état actuel.
+
+ZAP est sous profil optionnel. Sa commande actuelle met à jour les modules
+complémentaires puis se termine; elle ne lance pas de scan.
+
+## Architecture cible
+
+Les diagrammes Mermaid ci-dessous décrivent une architecture DevSecOps plus
+complète que la stack déployée. Ils incluent des outils non présents dans le
+Compose actuel, par exemple Harbor, Vault, DefectDojo, Trivy, Checkov,
+Prometheus, Grafana et Falco. Ils servent de cible et ne doivent pas être
+interprétés comme des services déjà installés.
+
+- [Vue d'ensemble des composants et de leurs relations](assets/deepseek_mermaid_20261030_4db7ca.mermaid)
+- [Séquence envisagée pour un pipeline CI/CD](assets/deepseek_mermaid_20261030_009da0.mermaid)
+- [Roadmap de déploiement par phases](assets/deepseek_mermaid_20261030_bac46e.mermaid)
+
+## Captures Jenkins
+
+Captures disponibles dans `assets/`, classées par heure de capture :
+
+![Capture Jenkins du 30 octobre 2026 à 10:54](assets/Jenkins%20Docker%20Security%20Pipeline-2026-10-30-105445.png)
+
+![Capture Jenkins du 30 octobre 2026 à 11:42](assets/Jenkins%20Docker%20Security%20Pipeline-2026-10-30-114244.png)
+
+![Capture Jenkins du 30 octobre 2026 à 11:43](assets/Jenkins%20Docker%20Security%20Pipeline-2026-10-30-114338.png)
+
+![Capture Jenkins du 30 octobre 2026 à 11:44](assets/Jenkins%20Docker%20Security%20Pipeline-2026-10-30-114417.png)

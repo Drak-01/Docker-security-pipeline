@@ -1,0 +1,44 @@
+sequenceDiagram
+    autonumber
+    participant DEV as 👨‍💻 Développeur
+    participant GIT as 📦 GitHub/GitLab
+    participant JEN as 🔧 Jenkins
+    participant GLK as 🔑 Gitleaks
+    participant DEP as 📚 Dependency-Check
+    participant SON as 🔍 SonarQube
+    participant TRV as 🐋 Trivy
+    participant CHK as 📐 Checkov
+    participant HAR as 📦 Harbor
+    participant COS as ✍️ Cosign
+    participant PRE as 🚀 Préproduction
+    participant ZAP as 🕷️ OWASP ZAP
+    participant DEF as 🛡️ DefectDojo
+    participant VLT as 🔐 Vault
+    participant PROD as ✅ Production
+    participant MON as 📊 Prometheus/Grafana
+    participant FLC as 👁️ Falco
+
+    DEV->>GIT: git push
+    GIT->>JEN: webhook
+    JEN->>VLT: Récupération secrets
+    JEN->>GLK: Scan secrets
+    JEN->>DEP: Scan dépendances
+    JEN->>SON: Analyse SAST
+    JEN->>TRV: Scan image Docker
+    JEN->>CHK: Scan IaC
+    JEN->>DEF: Envoi rapports
+    JEN->>HAR: Push image validée
+    HAR->>COS: Signature image
+    JEN->>PRE: Déploiement préprod
+    PRE->>ZAP: Scan DAST
+    ZAP->>DEF: Rapport vulnérabilités
+    DEF->>JEN: Décision (Quality Gate)
+    alt Quality Gate OK
+        JEN->>PROD: Déploiement autorisé
+    else Quality Gate KO
+        JEN->>DEF: Déploiement bloqué
+    end
+    MON-->>JEN: Métriques
+    MON-->>HAR: Métriques
+    MON-->>DEF: Métriques
+    FLC-->>MON: Alertes runtime
