@@ -11,16 +11,17 @@ accessible sur toutes les interfaces réseau, sous réserve des règles du pare-
 | Service | Publication | Accès |
 | --- | --- | --- |
 | Jenkins | Aucun port hôte | Via Nginx sur le port 80 |
-| Nginx | `8081:80` | Depuis le réseau local; filtrer le port avec le pare-feu |
+| Nginx | `8081:80`, `8082:8082` | Jenkins sur 8081, SonarQube sur 8082; limiter au réseau local |
 | SonarQube | `127.0.0.1:9000:9000` | Depuis le serveur uniquement |
 | PostgreSQL | Aucun port hôte | Réseau Docker uniquement |
 | OWASP ZAP | Aucun port hôte | Profil optionnel, réseau Docker uniquement |
 
 Jenkins n'est pas publié sur le port 8080 de l'hôte. Nginx le joint avec le nom
 de service Compose `jenkins` sur le réseau `pipeline`. Depuis un autre ordinateur
-du réseau local, ouvrez `http://IP_LOCALE_DU_SERVEUR:8081/`. Restreignez l'accès
-au port 8081 aux adresses du réseau local avec le pare-feu. SonarQube reste
-accessible directement uniquement sur le serveur via `http://127.0.0.1:9000`.
+du réseau local, ouvrez `http://IP_LOCALE_DU_SERVEUR:8081/` pour Jenkins et
+`http://IP_LOCALE_DU_SERVEUR:8082/` pour SonarQube. Restreignez les ports 8081
+et 8082 aux adresses du réseau local avec le pare-feu. SonarQube reste aussi
+accessible directement sur le serveur via `http://127.0.0.1:9000`.
 
 Le port 443 n'est pas activé tant qu'un certificat TLS et sa configuration Nginx
 ne sont pas installés. Ne publiez pas ce port comme HTTPS sans configurer TLS.

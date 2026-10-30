@@ -42,6 +42,7 @@ Compléter `.env` avant de démarrer la stack :
 ```dotenv
 NGINX_HTTP_PORT=8081
 SONARQUBE_HTTP_PORT=9000
+SONAR_PROXY_PORT=8082
 SONAR_DB_PASSWORD=remplacer_par_un_secret_unique
 ```
 
@@ -71,7 +72,8 @@ Accès depuis le serveur :
 
 Depuis un autre ordinateur du même réseau, ouvrez Jenkins avec
 `http://IP_LOCALE_DU_SERVEUR:8081` (remplacez par l'adresse IP locale du serveur).
-Le port 8081 doit être autorisé par le pare-feu uniquement depuis le réseau local.
+SonarQube est accessible sur `http://IP_LOCALE_DU_SERVEUR:8082`. Autorisez les
+ports 8081 et 8082 dans le pare-feu uniquement depuis le réseau local.
 N'utilisez pas le domaine `hakilox.com` pour cet accès HTTP, car le navigateur
 peut forcer HTTPS.
 
@@ -114,7 +116,7 @@ mais reste aussi joignable par Nginx sur le réseau Docker. Jenkins n'a aucun po
 hôte publié. Les détails sur les bindings réseau sont dans
 [`docs/note.md`](docs/note.md).
 
-Nginx écoute dans le conteneur sur le port 80, publié sur le port 8081 de toutes
-les interfaces du serveur. Limitez l'accès au port 8081 au réseau local avec le
-pare-feu. SonarQube reste lié à `127.0.0.1:9000` et n'est pas directement
-accessible depuis un autre ordinateur.
+Nginx écoute dans le conteneur sur les ports 80 et 8082, publiés respectivement
+sur 8081 et 8082 de toutes les interfaces du serveur. Limitez les deux ports au
+réseau local avec le pare-feu. SonarQube reste lié à `127.0.0.1:9000`; le port
+8082 le relaie via Nginx.
