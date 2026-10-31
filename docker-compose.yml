@@ -28,7 +28,7 @@ services:
       - pipeline
 
   sonarqube:
-    image: local/sonarqube:lts-community
+    image: local/sonarqube:community
     pull_policy: build
     build:
       context: ./sonarqube
