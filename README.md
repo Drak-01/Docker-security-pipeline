@@ -150,3 +150,10 @@ docker compose config --quiet
 docker compose build nginx-pipeline
 docker compose up -d --no-build --force-recreate nginx-pipeline
 docker compose port nginx-pipeline 8082
+
+docker compose stop sonarqube
+docker compose exec sonarqube-db pg_dump -U sonar -d sonarqube -Fc > sonarqube_backup_$(date +%F).dump
+
+docker compose build sonarqube
+docker compose up -d sonarqube
+docker compose logs -f sonarqube
