@@ -1,0 +1,1 @@
+FROM defectdojo/defectdojo-django:3.5.102-alpine@sha256:4eef3f247f290f6f70171780956e026f003f582ee3c20f767c08491dd098aa99

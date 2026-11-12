@@ -4,7 +4,12 @@ Stack locale de sécurité applicative basée sur Docker Compose : Jenkins,
 SonarQube, PostgreSQL, Nginx et OWASP ZAP.
 
 La documentation détaillée et les diagrammes sont disponibles dans
-[`docs/README.md`](docs/README.md).
+[`docs/README.md`](docs/README.md). Pour une introduction pas à pas, lire
+l'article [Jenkins et SonarQube sur Docker pour le SAST](docs/article-jenkins-sonarqube-sast.md).
+
+Les domaines `jenkins.example.com` et `sonar.example.com` utilisés ci-dessous
+sont des exemples : les remplacer par les siens, y compris dans
+[`nginx/conf.d/default.conf`](nginx/conf.d/default.conf).
 
 ## Architecture
 
@@ -37,7 +42,11 @@ sudo sysctl --system
 
 ## Configuration
 
-Compléter `.env` avant de démarrer la stack :
+Copier le modèle puis compléter `.env` avant de démarrer la stack :
+
+```bash
+cp .env.example .env
+```
 
 ```dotenv
 NGINX_HTTP_PORT=8081
@@ -56,15 +65,15 @@ les règles d'ingress suivantes :
 
 ```yaml
 ingress:
-	- hostname: jenkins.hakilox.com
-		service: http://localhost:8081
-		originRequest:
-			httpHostHeader: jenkins.hakilox.com
-	- hostname: sonar.hakilox.com
-		service: http://localhost:8082
-		originRequest:
-			httpHostHeader: sonar.hakilox.com
-	- service: http_status:404
+  - hostname: jenkins.example.com
+    service: http://localhost:8081
+    originRequest:
+      httpHostHeader: jenkins.example.com
+  - hostname: sonar.example.com
+    service: http://localhost:8082
+    originRequest:
+      httpHostHeader: sonar.example.com
+  - service: http_status:404
 ```
 
 Les ports Nginx sont liés à `127.0.0.1`; Cloudflared les atteint par localhost.
@@ -88,13 +97,13 @@ docker compose ps
 
 Accès via Cloudflare Tunnel :
 
-- Jenkins : `https://jenkins.hakilox.com`
-- SonarQube : `https://sonar.hakilox.com`
+- Jenkins : `https://jenkins.example.com`
+- SonarQube : `https://sonar.example.com`
 - SonarQube directement : `http://127.0.0.1:9000`
 
 Les URLs publiques sont servies en HTTPS par Cloudflare. Configure également
-l'URL Jenkins (`https://jenkins.hakilox.com`) dans Jenkins et l'URL de base
-SonarQube (`https://sonar.hakilox.com`) dans ses réglages d'administration pour
+l'URL Jenkins (`https://jenkins.example.com`) dans Jenkins et l'URL de base
+SonarQube (`https://sonar.example.com`) dans ses réglages d'administration pour
 éviter les redirections vers un ancien domaine.
 
 ## Utilisation
@@ -141,8 +150,14 @@ aucun port public n'est requis sur le serveur pour le tunnel. Jenkins et
 PostgreSQL ne sont pas publiés directement. SonarQube reste accessible sur
 `127.0.0.1:9000` pour l'administration locale.
 
+## Mise à jour du serveur
+
+Récupérer la dernière version du dépôt en préservant le `.env` local, puis
+reconstruire le service modifié (ici Nginx). `.env` n'est plus suivi par git :
+la sauvegarde évite qu'un `git pull` le supprime.
+
+```bash
 cp -p .env ../.env.server.backup
-git restore .env
 git pull --ff-only
 cp -p ../.env.server.backup .env
 
@@ -150,10 +165,42 @@ docker compose config --quiet
 docker compose build nginx-pipeline
 docker compose up -d --no-build --force-recreate nginx-pipeline
 docker compose port nginx-pipeline 8082
+```
 
+## Mise à jour de SonarQube (9.9 LTS → Community Build)
+
+Pour une nouvelle installation sans données à conserver, cette section ne
+s'applique pas : la version de `sonarqube/Dockerfile` crée directement la base.
+
+Les données sont dans PostgreSQL (volume `sonarqube_db`) : ne pas changer la
+version majeure de `postgres`. Depuis 9.9 (`lts-community`), passer d'abord par
+la 25.12 avant la version cible définie dans `sonarqube/Dockerfile`.
+
+1. Sauvegarder la base :
+
+```bash
 docker compose stop sonarqube
 docker compose exec sonarqube-db pg_dump -U sonar -d sonarqube -Fc > sonarqube_backup_$(date +%F).dump
+```
 
+2. Étape intermédiaire : mettre `FROM sonarqube:25.12.0.117093-community` dans
+   `sonarqube/Dockerfile`, puis :
+
+```bash
 docker compose build sonarqube
 docker compose up -d sonarqube
 docker compose logs -f sonarqube
+```
+
+   Ouvrir `http://localhost:9000/setup`, cliquer sur **Upgrade** et attendre
+   « Database is up-to-date ».
+
+3. Version cible : remettre `FROM sonarqube:26.10.0.133078-community`, relancer
+   les mêmes commandes, puis repasser par `/setup`.
+
+Les plugins tiers de `extensions/plugins` peuvent bloquer le démarrage : les
+retirer avant la migration. Pour revenir en arrière (image 9.9 + base restaurée) :
+
+```bash
+docker compose exec -T sonarqube-db pg_restore -U sonar -d sonarqube --clean < sonarqube_backup_AAAA-MM-JJ.dump
+```

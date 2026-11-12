@@ -23,8 +23,8 @@ flowchart LR
     Cloudflare --> Tunnel[cloudflared systemd]
 
     subgraph Docker[Reseau Docker Compose : docker-security-pipeline_pipeline]
-        Nginx -->|jenkins.hakilox.com| Jenkins
-        Nginx -->|sonar.hakilox.com| SonarQube
+        Nginx -->|jenkins.example.com| Jenkins
+        Nginx -->|sonar.example.com| SonarQube
         SonarQube --> PostgreSQL
         ZAP[OWASP ZAP - profil optionnel]
     end
@@ -35,7 +35,7 @@ flowchart LR
 ```
 
 Nginx choisit le service amont selon le nom d'hôte HTTP. Les noms actuels sont
-`jenkins.hakilox.com` et `sonar.hakilox.com`; ils sont définis dans
+`jenkins.example.com` et `sonar.example.com`; ils sont définis dans
 [`nginx/conf.d/default.conf`](../nginx/conf.d/default.conf). Le DNS doit pointer
 vers le tunnel Cloudflare. Cloudflared tourne sur l'hôte, pas dans Docker : il
 utilise les bindings loopback `http://localhost:8081` et `http://localhost:8082`.
@@ -54,11 +54,11 @@ complémentaires puis se termine; elle ne lance pas de scan.
 
 ## Cloudflare Tunnel et Access
 
-Le tunnel `hakilox_tunnel` existe déjà et Cloudflared est géré par systemd.
+Le tunnel Cloudflare existe déjà et Cloudflared est géré par systemd.
 Conserver son UUID et ses credentials; ne pas créer un autre tunnel. Ajouter les
 deux règles d'ingress vers `localhost:8081` et `localhost:8082`, avec
-`originRequest.httpHostHeader` réglé respectivement à `jenkins.hakilox.com` et
-`sonar.hakilox.com`. Une liaison Docker commune avec Cloudflared n'est pas
+`originRequest.httpHostHeader` réglé respectivement à `jenkins.example.com` et
+`sonar.example.com`. Une liaison Docker commune avec Cloudflared n'est pas
 nécessaire puisque le client tunnel tourne sur l'hôte.
 
 

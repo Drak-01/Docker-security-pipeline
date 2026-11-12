@@ -1,23 +1,53 @@
+x-hardened: &hardened
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 512
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   jenkins:
+    <<: *hardened
     image: local/jenkins:lts-jdk21
     pull_policy: build
     build:
       context: ./jenkins
       dockerfile: Dockerfile
-    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 2g
+    cpus: 2
     volumes:
       - jenkins_home:/var/jenkins_home
     networks:
       - pipeline
 
   nginx-pipeline:
-    image: local/nginx:1.27.3-alpine
+    <<: *hardened
     pull_policy: build
     build:
       context: ./nginx
       dockerfile: Dockerfile
-    restart: unless-stopped
+    # nginx démarre en root puis change d'utilisateur : il lui faut ces 4 capabilities
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    mem_limit: 128m
+    cpus: 0.5
     depends_on:
       - jenkins
       - sonarqube
@@ -28,31 +58,55 @@ services:
       - pipeline
 
   sonarqube:
+    <<: *hardened
     image: local/sonarqube:community
     pull_policy: build
     build:
       context: ./sonarqube
       dockerfile: Dockerfile
-    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /opt/sonarqube/temp
+    mem_limit: 4g
+    cpus: 2
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
+      nproc: 8192
     depends_on:
       sonarqube-db:
         condition: service_healthy
     environment:
       SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonarqube
       SONAR_JDBC_USERNAME: sonar
-      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Définis SONAR_DB_PASSWORD dans .env}
-    ports:
-      - "127.0.0.1:${SONARQUBE_HTTP_PORT:-9000}:9000"
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Définis SONAR_DB_PASSWORD dans .env}router
+    # Port 9000 non publié : l'accès passe par nginx (8082) et Jenkins par le réseau interne
     volumes:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
     networks:
       - pipeline
+      - db
 
   sonarqube-db:
-    image: postgres:17-alpine
-    restart: unless-stopped
+    <<: *hardened
+    image: postgres:17-alpine3.24@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac   # à épingler
+    # L'entrypoint Postgres démarre en root puis bascule sur l'utilisateur postgres
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/postgresql
+    mem_limit: 512m
+    cpus: 1
     environment:
       POSTGRES_DB: sonarqube
       POSTGRES_USER: sonar
@@ -65,9 +119,38 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - pipeline
+      - db   # réseau interne : pas d'accès Internet ni depuis Jenkins
 
+  # Démarré uniquement à la demande (profile) : arrêté en dehors des builds
+  trivy-server:
+    <<: *hardened
+    restart: "no"
+    build:
+      context: ./trivy
+      dockerfile: Dockerfile
+    profiles:
+      - security-tools
+    command:
+      - server
+      - --listen
+      - 0.0.0.0:4954
+      - --cache-dir
+      - /cache
+      - --token
+      - ${TRIVY_TOKEN:?Définis TRIVY_TOKEN dans .env}
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 1g
+    cpus: 1
+    volumes:
+      - trivy_cache:/cache
+    networks:
+      - pipeline
+  
   zap:
+    <<: *hardened
+    restart: "no"
     image: local/owasp-zap:stable
     pull_policy: build
     build:
@@ -75,6 +158,12 @@ services:
       dockerfile: Dockerfile
     profiles:
       - security-tools
+    # Pas de read_only : ZAP écrit dans son répertoire personnel (~/.ZAP)
+    mem_limit: 2g
+    cpus: 2
+    volumes:
+      - ./zap-reports:/zap/wrk:rw
+    # \# Montage d'un dossier hôte/CI pour récupérer les rapports HTML et JSON
     entrypoint: ["zap.sh"]
     command: ["-cmd", "-addonupdate"]
     networks:
@@ -86,8 +175,13 @@ volumes:
   sonarqube_extensions:
   sonarqube_logs:
   sonarqube_db:
+  trivy_cache:
 
 networks:
   pipeline:
     name: docker-security-pipeline_pipeline
     driver: bridge
+  db:
+    name: docker-security-pipeline_db
+    driver: bridge
+    internal: true

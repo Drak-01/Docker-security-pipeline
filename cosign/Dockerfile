@@ -1,0 +1,1 @@
+FROM ghcr.io/sigstore/cosign/cosign:sha256-330b5eec37c0c87865a8f03090d9b70bbfa2e11985b9c7c9710c4e8ee45a0794
