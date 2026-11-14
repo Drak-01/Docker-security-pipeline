@@ -67,7 +67,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /opt/sonarqube/temp
     mem_limit: 4g
     cpus: 2
     ulimits:
