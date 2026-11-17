@@ -204,3 +204,13 @@ retirer avant la migration. Pour revenir en arrière (image 9.9 + base restauré
 ```bash
 docker compose exec -T sonarqube-db pg_restore -U sonar -d sonarqube --clean < sonarqube_backup_AAAA-MM-JJ.dump
 ```
+
+
+# Démarrer tous les services, y compris les outils de sécurité
+docker compose --profile security-tools up -d
+
+# Démarrer uniquement Trivy et ses dépendances
+docker compose --profile security-tools up -d trivy-server
+
+# Démarrer uniquement ZAP
+docker compose --profile security-tools up -d zap

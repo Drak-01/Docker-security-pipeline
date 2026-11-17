@@ -1,3 +1,5 @@
+name: docker-security-pipeline
+
 x-hardened: &hardened
   restart: unless-stopped
   security_opt:
@@ -10,6 +12,12 @@ x-hardened: &hardened
     options:
       max-size: "10m"
       max-file: "3"
+
+# Proxy d'egress partagé par les services qui doivent sortir sur Internet
+x-proxy-env: &proxy-env
+  HTTP_PROXY: http://egress-proxy:3128
+  HTTPS_PROXY: http://egress-proxy:3128
+  NO_PROXY: localhost,127.0.0.1,sonarqube,trivy-server,jenkins
 
 services:
   jenkins:
@@ -24,10 +32,14 @@ services:
       - /tmp
     mem_limit: 2g
     cpus: 2
+    environment:
+      JAVA_OPTS: >-
+        -Dhttp.proxyHost=egress-proxy -Dhttp.proxyPort=3128
+        -Dhttps.proxyHost=egress-proxy -Dhttps.proxyPort=3128
+        -Dhttp.nonProxyHosts=sonarqube|trivy-server|localhost
     volumes:
       - jenkins_home:/var/jenkins_home
-    networks:
-      - pipeline
+    networks: [apps]
 
   nginx-pipeline:
     <<: *hardened
@@ -54,8 +66,7 @@ services:
     ports:
       - "127.0.0.1:${NGINX_HTTP_PORT:-8081}:80"
       - "127.0.0.1:${SONAR_PROXY_PORT:-8082}:8082"
-    networks:
-      - pipeline
+    networks: [edge, apps]
 
   sonarqube:
     <<: *hardened
@@ -86,13 +97,11 @@ services:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
-    networks:
-      - pipeline
-      - db
+    networks: [apps, db]
 
   sonarqube-db:
     <<: *hardened
-    image: postgres:17-alpine3.24@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac   # à épingler
+    image: postgres:17-alpine3.24@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
     # L'entrypoint Postgres démarre en root puis bascule sur l'utilisateur postgres
     cap_add:
       - CHOWN
@@ -117,18 +126,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks:
-      - db   # réseau interne : pas d'accès Internet ni depuis Jenkins
+    networks: [db]
 
-  # Démarré uniquement à la demande (profile) : arrêté en dehors des builds
+  egress-proxy:
+    <<: *hardened
+    image: local/squid:7.2
+    pull_policy: build
+    build:
+      context: ./squid
+      dockerfile: Dockerfile
+      pull: true
+    read_only: true
+    # HYPOTHÈSE à valider avec validate-hardening.sh (uid lu sur l'image : 584792, CapEff=0)
+    tmpfs:
+      - /tmp:size=32m
+      - /run:size=8m,uid=584792,gid=584792
+      - /var/log/squid:size=64m,uid=584792,gid=584792
+      - /var/spool/squid:size=64m,uid=584792,gid=584792
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    # La conf est copiée dans l'image par le Dockerfile (COPY squid.conf)
+    networks: [apps, egress]   # passerelle contrôlée
+
+  # ---- Outils à la demande (profile security-tools) ----
+
   trivy-server:
     <<: *hardened
     restart: "no"
+    image: local/trivy:server
+    pull_policy: build
     build:
       context: ./trivy
       dockerfile: Dockerfile
     profiles:
       - security-tools
+    environment:
+      <<: *proxy-env
     command:
       - server
       - --listen
@@ -136,7 +170,7 @@ services:
       - --cache-dir
       - /cache
       - --token
-      - ${TRIVY_TOKEN:?Définis TRIVY_TOKEN dans .env}
+      - ${TRIVY_TOKEN:?Définis TRIVY_TOKEN dans .env}   # TODO étape secrets
     read_only: true
     tmpfs:
       - /tmp
@@ -144,9 +178,8 @@ services:
     cpus: 1
     volumes:
       - trivy_cache:/cache
-    networks:
-      - pipeline
-  
+    networks: [apps]
+
   zap:
     <<: *hardened
     restart: "no"
@@ -160,13 +193,42 @@ services:
     # Pas de read_only : ZAP écrit dans son répertoire personnel (~/.ZAP)
     mem_limit: 2g
     cpus: 2
+    # Montage d'un dossier hôte/CI pour récupérer les rapports HTML et JSON
     volumes:
       - ./zap-reports:/zap/wrk:rw
-    # \# Montage d'un dossier hôte/CI pour récupérer les rapports HTML et JSON
     entrypoint: ["zap.sh"]
     command: ["-cmd", "-addonupdate"]
-    networks:
-      - pipeline
+    networks: [scan]
+
+  hadolint:
+    <<: *hardened
+    restart: "no"
+    image: local/hadolint:latest
+    pull_policy: build
+    build:
+      context: ./hadolint
+      dockerfile: Dockerfile
+    profiles:
+      - security-tools
+    network_mode: none
+    mem_limit: 512m
+    cpus: 1
+
+  cosign:
+    <<: *hardened
+    restart: "no"
+    image: local/cosign:latest
+    pull_policy: build
+    build:
+      context: ./cosing        # dossier à renommer ./cosign, puis mettre à jour cette ligne
+      dockerfile: Dockerfile
+    profiles:
+      - security-tools
+    environment:
+      <<: *proxy-env
+    mem_limit: 512m
+    cpus: 1
+    networks: [apps]           # sortie uniquement via egress-proxy (ajouter le registry à la liste blanche Squid)
 
 volumes:
   jenkins_home:
@@ -177,10 +239,24 @@ volumes:
   trivy_cache:
 
 networks:
-  pipeline:
-    name: docker-security-pipeline_pipeline
+  edge:
+    name: docker-security-pipeline_edge
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+  apps:
+    name: docker-security-pipeline_apps
+    driver: bridge
+    internal: true
   db:
     name: docker-security-pipeline_db
+    driver: bridge
+    internal: true
+  egress:
+    name: docker-security-pipeline_egress
+    driver: bridge
+  scan:
+    name: docker-security-pipeline_scan
     driver: bridge
     internal: true

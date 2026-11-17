@@ -209,6 +209,48 @@ pipeline {
 
 ![Résultat de l'analyse dans SonarQube](./assets/10.png)
 
+## 11. Création webhooks pour prévenir jenkins avec la fin 
+Un webhook SonarQube est un mécanisme de notification automatique qui permet à SonarQube de prévenir Jenkins dès qu'une analyse de code est terminée. Sans lui, Jenkins ne saurait jamais que l'analyse est finie et resterait bloqué à attendre, comme vous l'avez observé.
+
+- Comment le configurer
+
+1. Configurer le secret puis sur le sonarqube ajouter dans 
+
+ Étape 2 : Ajouter le secret dans SonarQube
+C'est l'étape que vous êtes en train d'effectuer. Dans la fenêtre de mise à jour du webhook que vous avez ouverte :
+
+Dans le champ Secret, cliquez sur "edit secret".
+
+Collez la valeur que vous venez de générer à l'étape 1.
+
+Cliquez sur Update pour enregistrer.
+
+openssl rand -hex 32
+
+Étape 3 : Configurer le secret dans Jenkins
+
+Maintenant, Jenkins doit connaître ce même secret pour pouvoir valider les requêtes entrantes. La documentation de Jenkins confirme cette procédure.
+
+Dans Jenkins, allez dans Manage Jenkins > Configure System.
+
+Descendez jusqu'à la section SonarQube servers et cliquez sur le bouton Advanced... de votre configuration serveur.
+
+Dans le champ Webhook Secret, cliquez sur Add (ou Ajouter).
+
+Sélectionnez le type de credential Secret text.
+
+Dans le champ Secret, collez la même chaîne que celle utilisée dans SonarQube.
+
+Donnez-lui un ID clair et descriptif (par exemple, sonarqube-webhook-secret) et une description.
+
+Cliquez sur Add pour créer le credential.
+
+Important : Sélectionnez maintenant ce nouveau credential dans le menu déroulant du champ Webhook Secret.
+
+Sauvegardez la configuration globale de Jenkins.
+
+
+
 ### Problèmes fréquents
 
 | Symptôme | Cause probable |
