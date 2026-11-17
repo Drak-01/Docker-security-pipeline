@@ -1,25 +1,43 @@
 name: docker-security-pipeline
 
+# ---------------------------------------------------------------------------
+# Socle de durcissement commun
+# ---------------------------------------------------------------------------
 x-hardened: &hardened
   restart: unless-stopped
+  init: true
+  stop_grace_period: 30s
   security_opt:
     - no-new-privileges:true
   cap_drop:
     - ALL
-  pids_limit: 512
+  pids_limit: 512            # surchargé pour Jenkins et SonarQube
   logging:
     driver: json-file
     options:
       max-size: "10m"
       max-file: "3"
 
-# Proxy d'egress partagé par les services qui doivent sortir sur Internet
+# Proxy d'egress (majuscules ET minuscules : beaucoup d'outils ne lisent que les minuscules)
 x-proxy-env: &proxy-env
   HTTP_PROXY: http://egress-proxy:3128
   HTTPS_PROXY: http://egress-proxy:3128
-  NO_PROXY: localhost,127.0.0.1,sonarqube,trivy-server,jenkins
+  http_proxy: http://egress-proxy:3128
+  https_proxy: http://egress-proxy:3128
+  NO_PROXY: localhost,127.0.0.1,egress-proxy,nginx-pipeline,jenkins,sonarqube,sonarqube-db,trivy-server
+  no_proxy: localhost,127.0.0.1,egress-proxy,nginx-pipeline,jenkins,sonarqube,sonarqube-db,trivy-server
+
+# ---------------------------------------------------------------------------
+# Secrets : fichiers hors git (voir commandes de création dans la réponse)
+# ---------------------------------------------------------------------------
+secrets:
+  sonar_db_password:
+    file: ./secrets/sonar_db_password
+  trivy_token:
+    file: ./secrets/trivy_token
 
 services:
+  # ------------------------------------------------------------------ Jenkins
   jenkins:
     <<: *hardened
     image: local/jenkins:lts-jdk21
@@ -27,27 +45,47 @@ services:
     build:
       context: ./jenkins
       dockerfile: Dockerfile
+      pull: true
+    user: "1000:1000"
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=512m,uid=1000,gid=1000
+    pids_limit: 2048
     mem_limit: 2g
+    memswap_limit: 2g
     cpus: 2
     environment:
+      <<: *proxy-env
       JAVA_OPTS: >-
+        -XX:MaxRAMPercentage=70.0
         -Dhttp.proxyHost=egress-proxy -Dhttp.proxyPort=3128
         -Dhttps.proxyHost=egress-proxy -Dhttps.proxyPort=3128
-        -Dhttp.nonProxyHosts=sonarqube|trivy-server|localhost
+        -Dhttp.nonProxyHosts=sonarqube|trivy-server|nginx-pipeline|localhost
     volumes:
       - jenkins_home:/var/jenkins_home
-    networks: [apps]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/login >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    stop_grace_period: 60s
+    networks:
+      ci: {}
+      tools: {}
+      proxy:
+        ipv4_address: 172.31.251.10
 
+  # -------------------------------------------------------------------- nginx
   nginx-pipeline:
     <<: *hardened
     pull_policy: build
     build:
       context: ./nginx
       dockerfile: Dockerfile
-    # nginx démarre en root puis change d'utilisateur : il lui faut ces 4 capabilities
+      pull: true
+    # nginx démarre en root puis change d'utilisateur : il lui faut ces 4 capabilities.
+    # Pour les supprimer : image nginxinc/nginx-unprivileged (port interne 8080) + user: "101:101".
     cap_add:
       - CHOWN
       - SETUID
@@ -55,19 +93,30 @@ services:
       - NET_BIND_SERVICE
     read_only: true
     tmpfs:
-      - /tmp
-      - /var/cache/nginx
-      - /var/run
+      - /tmp:size=16m
+      - /var/cache/nginx:size=64m
+      - /var/run:size=8m
     mem_limit: 128m
+    memswap_limit: 128m
     cpus: 0.5
     depends_on:
-      - jenkins
-      - sonarqube
+      jenkins:
+        condition: service_healthy
+      sonarqube:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${NGINX_HTTP_PORT:-8081}:80"
       - "127.0.0.1:${SONAR_PROXY_PORT:-8082}:8082"
-    networks: [edge, apps]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 80 || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    networks:
+      edge: {}
+      ci: {}
 
+  # ---------------------------------------------------------------- SonarQube
   sonarqube:
     <<: *hardened
     image: local/sonarqube:community
@@ -75,50 +124,74 @@ services:
     build:
       context: ./sonarqube
       dockerfile: Dockerfile
+      pull: true
+    user: "1000:1000"
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=512m,uid=1000,gid=1000
+      - /opt/sonarqube/temp:size=1g,uid=1000,gid=1000   # Elasticsearch et le serveur y écrivent
+    pids_limit: 4096
     mem_limit: 4g
+    memswap_limit: 4g
     cpus: 2
     ulimits:
       nofile:
         soft: 131072
         hard: 131072
       nproc: 8192
+    # Prérequis hôte (non réglable dans le conteneur) : sysctl -w vm.max_map_count=262144
     depends_on:
       sonarqube-db:
         condition: service_healthy
     environment:
       SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonarqube
       SONAR_JDBC_USERNAME: sonar
-      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Définis SONAR_DB_PASSWORD dans .env}
-    # Port 9000 non publié : l'accès passe par nginx (8082) et Jenkins par le réseau interne
+      # Mot de passe lu depuis le secret par l'entrypoint ci-dessous (jamais dans docker inspect)
+      SONAR_WEB_JAVAOPTS: "-Xmx1g -Xms512m"
+      SONAR_CE_JAVAOPTS: "-Xmx1g -Xms512m"
+      SONAR_SEARCH_JAVAOPTS: "-Xmx1g -Xms1g"
+    # SonarQube ne supporte pas *_FILE : wrapper qui exporte la variable puis lance l'entrypoint officiel
+    # (adapter le chemin si ton Dockerfile modifie l'ENTRYPOINT)
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'SONAR_JDBC_PASSWORD="$$(cat /run/secrets/sonar_db_password)"; export SONAR_JDBC_PASSWORD; exec /opt/sonarqube/docker/entrypoint.sh'
+    secrets:
+      - sonar_db_password
+    # Port 9000 non publié : accès via nginx (8082) et Jenkins par le réseau interne
     volumes:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
-    networks: [apps, db]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    stop_grace_period: 60s
+    networks: [ci, db]
 
+  # ----------------------------------------------------------------- Postgres
   sonarqube-db:
     <<: *hardened
     image: postgres:17-alpine3.24@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
-    # L'entrypoint Postgres démarre en root puis bascule sur l'utilisateur postgres
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETUID
-      - SETGID
+    # Lancé directement en postgres (uid 70 sur alpine) : plus aucune capability nécessaire.
+    # Volume existant créé par l'ancienne version : il appartient déjà à postgres (chown par l'entrypoint).
+    user: "70:70"
     read_only: true
     tmpfs:
-      - /tmp
-      - /run/postgresql
+      - /tmp:size=64m,uid=70,gid=70
+      - /run/postgresql:size=8m,uid=70,gid=70
     mem_limit: 512m
+    memswap_limit: 512m
     cpus: 1
     environment:
       POSTGRES_DB: sonarqube
       POSTGRES_USER: sonar
-      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?Définis SONAR_DB_PASSWORD dans .env}
+      POSTGRES_PASSWORD_FILE: /run/secrets/sonar_db_password
+    secrets:
+      - sonar_db_password
     volumes:
       - sonarqube_db:/var/lib/postgresql/data
     healthcheck:
@@ -126,8 +199,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 20s
+    stop_grace_period: 60s
     networks: [db]
 
+  # -------------------------------------------------------------- Squid (egress)
   egress-proxy:
     <<: *hardened
     image: local/squid:7.2
@@ -136,18 +212,28 @@ services:
       context: ./squid
       dockerfile: Dockerfile
       pull: true
+    user: "584792:584792"      # uid lu sur l'image, à valider avec validate-hardening.sh
     read_only: true
-    # HYPOTHÈSE à valider avec validate-hardening.sh (uid lu sur l'image : 584792, CapEff=0)
+    # Pas de cache (cache deny all) : /var/spool/squid supprimé
     tmpfs:
       - /tmp:size=32m
       - /run:size=8m,uid=584792,gid=584792
-      - /var/log/squid:size=64m,uid=584792,gid=584792
-      - /var/spool/squid:size=64m,uid=584792,gid=584792
+      - /var/log/squid:size=16m,uid=584792,gid=584792
     mem_limit: 256m
     memswap_limit: 256m
     cpus: 0.5
-    # La conf est copiée dans l'image par le Dockerfile (COPY squid.conf)
-    networks: [apps, egress]   # passerelle contrôlée
+    # squid.conf est copié dans l'image par le Dockerfile (COPY squid.conf)
+    healthcheck:
+      test: ["CMD-SHELL", "squid -k check || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 10s
+    networks:
+      proxy:
+        ipv4_address: 172.31.251.2
+      egress: {}
 
   # ---- Outils à la demande (profile security-tools) ----
 
@@ -159,26 +245,37 @@ services:
     build:
       context: ./trivy
       dockerfile: Dockerfile
+      pull: true
     profiles:
       - security-tools
+    # Pas de user: explicite : le volume trivy_cache est créé en root.
+    # Pour passer en non-root, initialiser le volume avec chown puis ajouter user: "65532:65532".
     environment:
       <<: *proxy-env
+    # Le token est lu dans le secret et exporté en variable : absent de la ligne de commande et de docker inspect
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - server
-      - --listen
-      - 0.0.0.0:4954
-      - --cache-dir
-      - /cache
-      - --token
-      - ${TRIVY_TOKEN:?Définis TRIVY_TOKEN dans .env}   # TODO étape secrets
+      - 'export TRIVY_TOKEN="$$(cat /run/secrets/trivy_token)"; exec trivy server --listen 0.0.0.0:4954 --cache-dir /cache'
+    secrets:
+      - trivy_token
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=128m
     mem_limit: 1g
+    memswap_limit: 1g
     cpus: 1
     volumes:
       - trivy_cache:/cache
-    networks: [apps]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:4954/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      tools: {}
+      proxy:
+        ipv4_address: 172.31.251.20
 
   zap:
     <<: *hardened
@@ -188,47 +285,72 @@ services:
     build:
       context: ./owasp-zap
       dockerfile: Dockerfile
+      pull: true
     profiles:
       - security-tools
-    # Pas de read_only : ZAP écrit dans son répertoire personnel (~/.ZAP)
+    user: "1000:1000"
+    # Pas de read_only : ZAP écrit dans ~/.ZAP (add-ons, sessions) ; un tmpfs masquerait les add-ons de l'image.
     mem_limit: 2g
+    memswap_limit: 2g
     cpus: 2
-    # Montage d'un dossier hôte/CI pour récupérer les rapports HTML et JSON
+    pids_limit: 1024
+    # ./zap-reports doit être inscriptible par l'uid 1000 (chown 1000:1000 zap-reports)
     volumes:
       - ./zap-reports:/zap/wrk:rw
     entrypoint: ["zap.sh"]
-    command: ["-cmd", "-addonupdate"]
+    # Les add-ons doivent être intégrés à l'image (réseau `scan` interne, pas d'Internet).
+    # Surcharger la commande au lancement, par exemple : -cmd -quickurl http://cible:8080 ...
+    command: ["-cmd", "-version"]
+    # Pour scanner une cible : la connecter à ce réseau (network `scan`)
     networks: [scan]
 
   hadolint:
     <<: *hardened
     restart: "no"
-    image: local/hadolint:latest
+    image: local/hadolint:2.12.0     # aligner le tag sur la version installée dans le Dockerfile
     pull_policy: build
     build:
       context: ./hadolint
       dockerfile: Dockerfile
+      pull: true
     profiles:
       - security-tools
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
     network_mode: none
+    # Usage : docker compose run --rm -T hadolint hadolint - < Dockerfile
+    stdin_open: true
     mem_limit: 512m
+    memswap_limit: 512m
     cpus: 1
 
   cosign:
     <<: *hardened
     restart: "no"
-    image: local/cosign:latest
+    image: local/cosign:2.5.0        # aligner le tag sur la version installée dans le Dockerfile
     pull_policy: build
     build:
-      context: ./cosing        # dossier à renommer ./cosign, puis mettre à jour cette ligne
+      context: ./cosign              # dossier renommé (était ./cosing)
       dockerfile: Dockerfile
+      pull: true
     profiles:
       - security-tools
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,uid=65532,gid=65532
     environment:
       <<: *proxy-env
+      HOME: /tmp                      # cache TUF/sigstore dans le tmpfs
     mem_limit: 512m
+    memswap_limit: 512m
     cpus: 1
-    networks: [apps]           # sortie uniquement via egress-proxy (ajouter le registry à la liste blanche Squid)
+    # Sortie uniquement via egress-proxy (sigstore + registry dans la liste blanche Squid)
+    networks:
+      proxy:
+        ipv4_address: 172.31.251.30
 
 volumes:
   jenkins_home:
@@ -238,22 +360,37 @@ volumes:
   sonarqube_db:
   trivy_cache:
 
+# ---------------------------------------------------------------------------
+# Réseaux segmentés par besoin réel
+# ---------------------------------------------------------------------------
 networks:
-  edge:
+  edge:                       # nginx <-> hôte (seul réseau non interne avec egress)
     name: docker-security-pipeline_edge
     driver: bridge
     ipam:
       config:
         - subnet: 172.31.250.0/24
-  apps:
-    name: docker-security-pipeline_apps
+  ci:                         # nginx, jenkins, sonarqube
+    name: docker-security-pipeline_ci
     driver: bridge
     internal: true
+  tools:                      # jenkins <-> trivy-server
+    name: docker-security-pipeline_tools
+    driver: bridge
+    internal: true
+  proxy:                      # clients autorisés à parler à Squid (IP fixes)
+    name: docker-security-pipeline_proxy
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.251.0/24
+          ip_range: 172.31.251.128/25   # IP dynamiques : .128 à .255 (IP fixes : .2 à .127)
   db:
     name: docker-security-pipeline_db
     driver: bridge
     internal: true
-  egress:
+  egress:                     # sortie Internet, Squid uniquement
     name: docker-security-pipeline_egress
     driver: bridge
   scan:

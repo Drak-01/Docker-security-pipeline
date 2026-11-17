@@ -214,3 +214,11 @@ docker compose --profile security-tools up -d trivy-server
 
 # Démarrer uniquement ZAP
 docker compose --profile security-tools up -d zap
+
+# 
+
+mkdir -p secrets && chmod 700 secrets
+openssl rand -base64 32 | tr -d '\n' > secrets/sonar_db_password
+openssl rand -base64 32 | tr -d '\n' > secrets/trivy_token
+chmod 444 secrets/*          # lisibles par les uid non-root, le dossier reste en 700
+echo "secrets/" >> .gitignore
