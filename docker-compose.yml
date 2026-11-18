@@ -236,7 +236,7 @@ services:
     cpus: 0.5
     # squid.conf est copié dans l'image par le Dockerfile (COPY squid.conf)
     healthcheck:
-      test: ["CMD-SHELL", "squid -k check || exit 1"]
+      test: ["CMD", "sh", "-c", "read p < /run/squid.pid && kill -0 \"$$p\""]
       interval: 30s
       timeout: 5s
       retries: 3

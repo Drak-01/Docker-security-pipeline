@@ -50,7 +50,7 @@ La GitHub App permet à SonarQube de lister et d'importer tes dépôts.
 | --- | --- |
 | GitHub App name | un nom unique, par exemple `DockerSecurityPipeline` |
 | Homepage URL | l'URL de ton dépôt ou de SonarQube |
-| Callback URL | `https://sonar.example.com/oauth2/callback/github` |
+| Callback URL | `https://sonar.example.com/projet/create` |
 | Webhook | désactivé (décoche **Active**) |
 
 ![Formulaire de création de la GitHub App](./assets/03.png)
