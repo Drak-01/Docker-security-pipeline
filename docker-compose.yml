@@ -225,13 +225,12 @@ services:
       dockerfile: Dockerfile
       pull: true
     user: "584792:584792"      # uid lu sur l'image, à valider avec validate-hardening.sh
-    read_only: true
+    # read_only: true elle ecrit dans le /var/lib/pebble
     # Pas de cache (cache deny all) : /var/spool/squid supprimé
     tmpfs:
       - /tmp:size=32m
       - /run:size=8m,uid=584792,gid=584792
       - /var/log/squid:size=16m,uid=584792,gid=584792
-      - /var/lib/pebble/default:size=8m,uid=584792,gid=584792
     mem_limit: 256m
     memswap_limit: 256m
     cpus: 0.5
