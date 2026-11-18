@@ -152,6 +152,14 @@ services:
       SONAR_SEARCH_JAVAOPTS: "-Xmx1g -Xms1g"
     # SonarQube ne supporte pas *_FILE : wrapper qui exporte la variable puis lance l'entrypoint officiel
     # (adapter le chemin si ton Dockerfile modifie l'ENTRYPOINT)
+      SONAR_WEB_JAVAADDITIONALOPTS: >-
+        -Dhttp.proxyHost=egress-proxy -Dhttp.proxyPort=3128
+        -Dhttps.proxyHost=egress-proxy -Dhttps.proxyPort=3128
+        -Dhttp.nonProxyHosts=localhost|127.0.0.1|sonarqube
+      SONAR_CE_JAVAADDITIONALOPTS: >-
+        -Dhttp.proxyHost=egress-proxy -Dhttp.proxyPort=3128
+        -Dhttps.proxyHost=egress-proxy -Dhttps.proxyPort=3128
+        -Dhttp.nonProxyHosts=localhost|127.0.0.1|sonarqube
     entrypoint:
       - /bin/sh
       - -c
@@ -170,7 +178,11 @@ services:
       retries: 10
       start_period: 180s
     stop_grace_period: 60s
-    networks: [ci, db]
+    networks:
+      ci: {}
+      db: {}
+      proxy:
+        ipv4_address: 172.31.251.50
 
   # ----------------------------------------------------------------- Postgres
   sonarqube-db:
