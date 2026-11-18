@@ -1,1 +1,1 @@
-FROM ghcr.io/sigstore/cosign/cosign:sha256-330b5eec37c0c87865a8f03090d9b70bbfa2e11985b9c7c9710c4e8ee45a0794
+FROM ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d
